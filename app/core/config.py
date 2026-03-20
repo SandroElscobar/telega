@@ -1,10 +1,7 @@
-from dataclasses import field
 from typing import Optional, List, Any
-
-from firebase_admin.remote_config import ServerConfig
-from pydantic.v1.env_settings import env_file_sentinel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, SecretStr, field_validator
+import secrets
 import os
 
 class Settings(BaseSettings):
@@ -22,8 +19,8 @@ class Settings(BaseSettings):
 
     # --- База данных ---
     DATABASE_URL: str = Field(
-        default="postgres://postgres:postgres@localhost:5432/postgres",
-        description="URL для подключения к PostgreSQL",
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres",
+        description="Асинхронный URL для подключения к PostgreSQL",
     )
 
     DATABASE_ECHO: bool = Field(
@@ -95,7 +92,7 @@ class Settings(BaseSettings):
                 RuntimeWarning
             )
             # Возвращаем тестовый ключ (только для разработки!)
-            return "development-insecure-key-change-me"
+            return secrets.token_urlsafe(32)
         return v
 
 
