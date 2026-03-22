@@ -1,16 +1,21 @@
 """
 Модель пользователя.
 """
+from __future__ import annotations
 from datetime import datetime
 
 
-from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime, Text
+from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 import enum
 import re
 
 from app.models.base import Base, TimestampMixin, SoftDeleteMixin
+
+if TYPE_CHECKING:
+    from app.models.message import Message
+    from app.models.chat import Chat, ChatParticipant
 
 class UserStatus(str, enum.Enum):
     """Статус пользователя в системе."""
@@ -31,7 +36,7 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     """
     __tablename__ = 'users'
     id:Mapped[int] = mapped_column(primary_key=True, index=True)
-    phone_number:Mapped[int] = mapped_column(
+    phone_number:Mapped[str] = mapped_column(
         String(20),
         unique=True,
         index=True,
@@ -82,7 +87,7 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         comment="Текущий статус учетной записи"
     )
 
-    is_online:Mapped[Optional[datetime]] = mapped_column(
+    is_online:Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
@@ -114,6 +119,12 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         comment="Подписанный предварительный ключ для E2EE"
     )
 
+    push_token: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Токен для push-уведомлений (FCM)"
+    )
+
     push_token_update_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -141,20 +152,39 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         comment="Включены ли уведомления"
     )
 
+
     # Отношения с другими таблицами
-    # send_messages: Mapped[List["Message"]] = relationship(
-    #     back_populates="sender",
-    #     foreign_keys="Message.sender_id"
-    # )
-    #
-    # receive_messages: Mapped[List["Message"]] = relationship(
-    #     back_populates="receiver",
-    #     foreign_keys="[Message.receiver_id]"
-    # )
-    #
-    # chats: Mapped[List["ChatParticipant"]] = relationship(
-    #     back_populates="user"
-    # )
+    send_messages: Mapped[List["Message"]] = relationship(
+        "Message",
+        back_populates="sender",
+        foreign_keys="[Message.sender_id]",
+        cascade="all, delete-orphan",
+        lazy = "selectin"
+    )
+
+    chat_participants: Mapped[list["ChatParticipant"]] = relationship(
+        "ChatParticipant",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
+    chats: Mapped[List["Chat"]] = relationship(
+        "Chat",
+        secondary="chat_participants",
+        overlaps="chat_participants",  # указываем, что это отношение перекрывается с chat_participants
+        viewonly=True,  # или False, если хотите изменять через user.chats
+        lazy="selectin"
+    )
+
+    created_chat: Mapped[List["Chat"]] = relationship(
+        "Chat",
+        back_populates="created_by",
+        foreign_keys="[Chat.created_by_id]",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
 
     def __repr__(self) -> str:
         return f"<User (id = {self.id}, phone = {self.phone_number}, username = {self.username})>"

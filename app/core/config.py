@@ -2,7 +2,6 @@ from typing import Optional, List, Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, SecretStr, field_validator
 import secrets
-import os
 
 class Settings(BaseSettings):
     """
@@ -20,7 +19,7 @@ class Settings(BaseSettings):
     # --- База данных ---
     DATABASE_URL: str = Field(
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres",
-        description="Асинхронный URL для подключения к PostgreSQL",
+        description="Асинхронный URL для подключения к PostgreeSQL",
     )
 
     DATABASE_ECHO: bool = Field(
@@ -51,7 +50,7 @@ class Settings(BaseSettings):
     )
 
     # --- Пароли ---
-    # Используем Argon2 - самый надежный на данный момент алгоритм хеширования
+    # Используем, Argon2 - самый надежный на данный момент алгоритм хеширования
     PASSWORD_HASH_SCHEMES: List[str] = Field(
         default=["argon2", "bcrypt"],  # argon2 приоритетнее
         description="Схемы хеширования паролей для passlib"

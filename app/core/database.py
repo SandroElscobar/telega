@@ -18,7 +18,7 @@ class DataBaseManager:
     """
     def __init__(self):
         self.engine: Optional[AsyncEngine] = None
-        self.async_session_marker: Optional[async_sessionmaker[AsyncSession]] = None
+        self.async_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
     def init(self, database_url: str = None, echo: bool = None):
         """
@@ -39,7 +39,7 @@ class DataBaseManager:
             pool_recycle=3600   # Переиспользовать соединения каждый час
         )
 
-        self.async_session_marker = async_sessionmaker(
+        self.async_session_maker = async_sessionmaker(
             bind=self.engine,
             class_=AsyncSession,
             expire_on_commit=False,  # Не делать объекты устаревшими после commit
@@ -62,9 +62,9 @@ class DataBaseManager:
                 result = await session.execute(...)
         """
 
-        if not self.async_session_marker:
+        if not self.async_session_maker:
             raise RuntimeError("Database manager не инициализирован. Вызовите init(")
-        async with self.async_session_marker() as session:
+        async with self.async_session_maker() as session:
             try:
                 yield session
                 await session.commit()

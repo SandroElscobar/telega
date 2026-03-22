@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
+from app.core.database import db_manager, init_db
 # from app.core.database import init_db  # Пока закомментируем, создадим позже
 
 # Настройка логирования (можно заменить на loguru позже)
@@ -27,13 +28,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"Режим: {'разработка' if settings.DATABASE_ECHO else 'продакшн'}")
 
     # Инициализация подключений к БД (будет позже)
-    # await init_db()
-
+    await init_db()
+    logger.info("✅ База данных инициализирована")
     yield
 
     # Shutdown
     logger.info("🛑 Завершение работы приложения...")
-    # Закрытие подключений (будет позже)
+    await db_manager.close()
+    logger.info("✅ Соединения с БД закрыты")
 
 
 # Создаем экземпляр FastAPI
@@ -55,6 +57,7 @@ async def root():
         "message": "Secure Messenger API",
         "version": "0.1.0",
         "status": "running",
+        "database": "connected",
         "docs": "/api/docs"
     }
 
@@ -62,7 +65,19 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса."""
-    return {"status": "healthy"}
+    # Проверяем подключение к БД
+    try:
+        async with db_manager.session() as session:
+            await session.execute("SELECT 1")
+        db_status = "healthy"
+    except Exception as e:
+        db_status = f"unhealthy: {e}"
+
+    return {
+        "status": "healthy",
+        "database": db_status,
+        "version": "0.1.0"
+    }
 
 # Здесь позже подключим роутеры
 # app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])

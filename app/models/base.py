@@ -27,6 +27,7 @@ class TimestampMixin:
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
         comment='Дата и время последнего обновления'
@@ -40,7 +41,7 @@ class SoftDeleteMixin:
         DateTime(timezone=True),
         nullable=True,
         index=True,
-        connent="Дата и время удаления (если не NULL - запись считается удаленной)"
+        comment="Дата и время удаления (если не NULL - запись считается удаленной)"
     )
     @property
     def is_deleted(self) -> bool:
