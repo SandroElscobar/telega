@@ -1,0 +1,169 @@
+erDiagram
+    User ||--o{ Contact : has
+    User ||--o{ Message : sends
+    User ||--o{ Reaction : creates
+    User ||--o{ Report : files
+    User ||--o{ Report : receives_reports
+    User ||--o{ Subscription : has
+    User ||--o{ Story : creates
+    User ||--o{ StoryView : views
+    User ||--o{ StoryReaction : reacts
+    User ||--o{ StickerPack : owns
+    User ||--o{ ModerationLog : performs
+    
+    Chat ||--o{ ChatParticipant : has
+    Chat ||--o{ Message : contains
+    
+    Message ||--o{ Reaction : has
+    Message ||--o{ Report : targeted_in
+    
+    StickerPack ||--o{ Sticker : contains
+    
+    Story ||--o{ StoryView : viewed_by
+    Story ||--o{ StoryReaction : reacted_by
+    
+    Subscription ||--o{ Payment : has
+    
+    User {
+        int id PK
+        string phone_number UK
+        boolean phone_number_verified
+        string username UK
+        string full_name
+        string bio
+        string hashed_password
+        enum status
+        boolean is_online
+        datetime last_seen_at
+        string public_key
+        string e2ee_salt
+        string signed_pre_key
+        boolean is_premium
+        datetime premium_until
+        boolean can_be_found_by_phone
+        boolean show_phone_number
+        boolean show_last_seen
+        datetime deletion_scheduled_at
+        string push_token
+    }
+    
+    Chat {
+        int id PK
+        enum chat_type
+        string title
+        string description
+        string avatar_url
+        int created_by_id FK
+        string encryption_key
+        string encryption_salt
+        boolean is_public
+        string join_link
+    }
+    
+    Message {
+        bigint id PK
+        int chat_id FK
+        int sender_id FK
+        enum message_type
+        enum status
+        text encrypted_content
+        string content_nonce
+        string media_url
+        text media_encrypted_key
+        boolean is_pinned
+        int reactions_count
+        int reply_to_id FK
+    }
+    
+    Contact {
+        int id PK
+        int user_id FK
+        int contact_user_id FK
+        string phone_number
+        string name
+    }
+    
+    Reaction {
+        int id PK
+        int message_id FK
+        int user_id FK
+        string emoji
+    }
+    
+    Report {
+        int id PK
+        int reporter_id FK
+        enum target_type
+        int target_id
+        int message_id FK
+        int chat_id FK
+        int reported_user_id FK
+        enum report_type
+        text description
+        enum status
+        int moderator_id FK
+        datetime resolved_at
+    }
+    
+    Subscription {
+        int id PK
+        int user_id FK
+        enum plan
+        datetime starts_at
+        datetime expires_at
+        boolean auto_renew
+    }
+    
+    Payment {
+        int id PK
+        int user_id FK
+        int subscription_id FK
+        decimal amount
+        enum provider
+        string provider_payment_id
+        enum status
+    }
+    
+    Story {
+        int id PK
+        int user_id FK
+        enum story_type
+        string media_url
+        text encrypted_content
+        enum privacy
+        datetime expires_at
+        int views_count
+    }
+    
+    StoryView {
+        int id PK
+        int story_id FK
+        int viewer_id FK
+    }
+    
+    StickerPack {
+        int id PK
+        string name
+        string title
+        int owner_id FK
+        boolean is_premium
+    }
+    
+    Sticker {
+        int id PK
+        int pack_id FK
+        string emoji
+        string file_url
+        int width
+        int height
+    }
+    
+    ModerationLog {
+        int id PK
+        int moderator_id FK
+        enum action
+        string target_type
+        int target_id
+        text reason
+        datetime created_at
+    }

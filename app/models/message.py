@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from sqlalchemy import String, Boolean, ForeignKey, Integer, Text, JSON, BigInteger, Enum as SQLEnum, Index, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any, TYPE_CHECKING, List
 import enum
 
 from app.models.base import Base, TimestampMixin, SoftDeleteMixin
@@ -146,6 +146,46 @@ class Message(Base, TimestampMixin, SoftDeleteMixin):
         comment="ID оригинального сообщения (если переслано)"
     )
 
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Закреплено ли сообщение"
+    )
+
+    pinned_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        comment="Кто закрепил сообщение"
+    )
+
+    pinned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Когда было закреплено"
+    )
+
+    reactions_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Количество реакций (денормализация)"
+    )
+
+    edit_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Количество правок сообщения"
+    )
+
+    edited_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время последней правки"
+    )
+
+
     # Отношения
     chat: Mapped["Chat"] = relationship(
         "Chat",
@@ -168,6 +208,17 @@ class Message(Base, TimestampMixin, SoftDeleteMixin):
         "Message",
         foreign_keys=[reply_to_id],
         back_populates="reply_to"
+    )
+
+    reactions: Mapped[List["Reaction"]] = relationship(
+        "Reaction",
+        back_populates="message",
+        cascade="all, delete-orphan"
+    )
+
+    pinned_by: Mapped[Optional["User"]] = relationship(
+        "User",
+        foreign_keys=[pinned_by_id]
     )
 
     # Индексы для быстрого поиска

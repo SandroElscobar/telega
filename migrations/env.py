@@ -1,8 +1,5 @@
-import asyncio
+
 from logging.config import fileConfig
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -17,9 +14,19 @@ sys.path.append(str(Path(__file__).parent.parent))
 # Импортируем настройки и модели
 from app.core.config import settings
 from app.models.base import Base
+from app.core.config import settings
+from app.models.base import Base
 from app.models.user import User
 from app.models.chat import Chat, ChatParticipant
 from app.models.message import Message
+from app.models.contact import Contact
+from app.models.reaction import Reaction
+from app.models.report import Report
+from app.models.subscription import Subscription, Payment
+from app.models.story import Story, StoryView, StoryReaction
+from app.models.sticker import Sticker, StickerPack
+from app.models.moderation_log import ModerationLog
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -56,7 +63,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    # Для оффлайн режима убираем +asyncpg из URL
+    # Для офлайн режима убираем +asyncpg из URL
     url = settings.DATABASE_URL.replace("+asyncpg", "")
     context.configure(
         url=url,

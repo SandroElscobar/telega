@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 
-from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime, Text, func
+from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List, TYPE_CHECKING
 import enum
@@ -16,6 +16,11 @@ from app.models.base import Base, TimestampMixin, SoftDeleteMixin
 if TYPE_CHECKING:
     from app.models.message import Message
     from app.models.chat import Chat, ChatParticipant
+    from app.models.contact import Contact
+    from app.models.report import Report
+    from app.models.sticker import StickerPack
+    from app.models.story import Story
+    from app.models.subscription import Subscription
 
 class UserStatus(str, enum.Enum):
     """Статус пользователя в системе."""
@@ -152,6 +157,73 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         comment="Включены ли уведомления"
     )
 
+    is_premium: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Флаг премиум-аккаунта"
+    )
+
+    premium_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Дата окончания премиум-подписки"
+    )
+
+    can_be_found_by_phone: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Можно ли найти пользователя по номеру телефона"
+    )
+
+    show_phone_number: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Показывать ли номер телефона в профиле"
+    )
+
+    show_last_seen: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Показывать ли время последней активности"
+    )
+
+    # Настройки чата
+    auto_download_media: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Автоматически загружать медиа"
+    )
+    auto_download_media_mobile: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Автозагрузка медиа в мобильной сети"
+    )
+
+    # Удаление аккаунта
+    deletion_scheduled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Дата запланированного удаления аккаунта"
+    )
+
+    deletion_reason: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Причина удаления аккаунта"
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment=" Удален ли пользователь"
+    )
+
 
     # Отношения с другими таблицами
     send_messages: Mapped[List["Message"]] = relationship(
@@ -183,6 +255,68 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         foreign_keys="[Chat.created_by_id]",
         cascade="all, delete-orphan",
         lazy="selectin"
+    )
+
+    # Связь "пользователь -> его контакты"
+    # Пользователь добавляет других пользователей в свой список контактов
+    # При удалении пользователя все его контакты также удаляются (cascade="all, delete-orphan")
+    contacts: Mapped[List["Contact"]] = relationship(
+        "Contact",
+        foreign_keys="Contact.user_id",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+
+    # Обратная связь "кто добавил текущего пользователя в контакты"
+    # Показывает, в чьих списках контактов находится данный пользователь
+    contact_of: Mapped[List["Contact"]] = relationship(
+        "Contact",
+        foreign_keys="Contact.contact_user_id",
+        back_populates="contact_user"
+    )
+
+    # Репорты (жалобы), созданные пользователем
+    # Пользователь может пожаловаться на других пользователей или контент
+    reports: Mapped[List["Report"]] = relationship(
+        "Report",
+        foreign_keys="Report.reporter_id",
+        back_populates="reporter"
+    )
+
+    # Репорты (жалобы), созданные на пользователя
+    # Показывает, сколько раз и кем был пожалован данный пользователь
+    reports_on_me: Mapped[List["Report"]] = relationship(
+        "Report",
+        foreign_keys="Report.reported_user_id",
+        back_populates="reported_user"
+    )
+
+    owned_sticker_packs: Mapped[List["StickerPack"]] = relationship(
+        "StickerPack",
+        foreign_keys="StickerPack.owner_id",
+        back_populates="owner"
+    )
+
+    # Истории (сторис), созданные пользователем
+    # Пользователь может публиковать множество историй
+    stories: Mapped[List["Story"]] = relationship(
+        "Story",
+        back_populates="user"
+    )
+
+    # Подписки пользователя
+    # Например, подписки на премиум-доступ, уведомления и т.д.
+    subscriptions: Mapped[List["Subscription"]] = relationship(
+        "Subscription",
+        back_populates="user"
+    )
+
+    owned_sticker_packs: Mapped[List["StickerPack"]] = relationship(back_populates="owner")
+
+    # Индексы
+    __table_args__ = (
+        Index('ix_users_deletion_scheduled', 'deletion_scheduled_at'),
+        Index('ix_users_premium_until', 'premium_until'),
     )
 
 

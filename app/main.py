@@ -2,12 +2,13 @@
 Точка входа в FastAPI приложение.
 """
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
 from app.core.database import db_manager, init_db
-# from app.core.database import init_db  # Пока закомментируем, создадим позже
+from app.core.minio_client import minio_client
 
 # Настройка логирования (можно заменить на loguru позже)
 logging.basicConfig(
@@ -30,6 +31,10 @@ async def lifespan(app: FastAPI):
     # Инициализация подключений к БД (будет позже)
     await init_db()
     logger.info("✅ База данных инициализирована")
+
+    minio_client.initialize()
+    logger.info("✅ MinIO инициализирован")
+
     yield
 
     # Shutdown
@@ -47,6 +52,15 @@ app = FastAPI(
     # Документация будет доступна по адресу /docs
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # В продакшне ограничить
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

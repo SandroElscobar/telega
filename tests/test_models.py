@@ -8,6 +8,7 @@ from app.models.base import Base
 from app.models.user import User, UserStatus
 from app.models.chat import Chat, ChatType, ChatParticipant, ParticipantRole
 from app.models.message import Message, MessageType, MessageStatus
+from app.models.contact import Contact
 
 @pytest.fixture
 async def engine():
@@ -634,3 +635,62 @@ async def cleanup(session):
     for table in reversed(Base.metadata.sorted_tables):
         await session.execute(table.delete())
     await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_create_contact(session):
+    """
+    Тест создания контакта.
+    Проверяет корректность создания экземпляра Contact и его атрибутов.
+    """
+    # Создаем пользователя-владельца контакта с корректными данными
+    user = User(
+        phone_number="+79001234567",
+        username="testuser",
+        full_name="Test User",
+        hashed_password="fake_hash"
+    )
+    session.add(user)
+    await session.flush()
+
+    # Проверяем, что пользователь создан и получил ID
+    assert user.id is not None
+
+    # Создаем контакт
+    contact = Contact(
+        user_id=user.id,
+        phone_number="+79001234568",
+        name="Тестовый Контакт"
+    )
+    session.add(contact)
+    await session.flush()
+
+    # Проверяем, что контакт создан корректно
+    assert contact.id is not None
+    assert contact.user_id == user.id
+    assert contact.phone_number == "+79001234568"
+    assert contact.name == "Тестовый Контакт"
+    assert contact.contact_user_id is None
+
+    # Загружаем relationship через refresh
+    await session.refresh(contact, attribute_names=["user"])
+
+    # Проверяем отношение
+    assert contact.user == user
+
+    # Проверяем уникальный индекс
+    duplicate_contact = Contact(
+        user_id=user.id,
+        phone_number="+79001234568",  # Дубликат
+        name="Дубль"
+    )
+    session.add(duplicate_contact)
+
+    with pytest.raises(Exception) as exc_info:
+        await session.flush()
+
+    await session.rollback()
+
+    # Проверяем, что ошибка связана с уникальностью
+    error_message = str(exc_info.value).lower()
+    assert any(word in error_message for word in ["unique", "duplicate", "uix_user_contact_phone"])
