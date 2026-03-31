@@ -4,12 +4,14 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 import logging
+import asyncio
 
 
 from app.core.celery_app import task
 from app.core.database import db_manager
+from app.models import UserStatus
 from app.models.story import Story
 from app.models.user import User
 
@@ -17,18 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 @task(queue="cleanup")
-def cleanup_expired_stories():
+def cleanup_expired_stories() -> dict:
     """
     Очистка просроченных историй.
     Запускается каждые 15 минут.
     """
-    import asyncio
 
     async def _cleanup():
         async with db_manager.session() as session:
             # Находим просроченные истории
             now = datetime.now(timezone.utc)
-            stmt = select(Story).where(Story.expires_at < now, Story.deleted_at.is_(None))
+            stmt = select(Story).where(
+                Story.expires_at < now,
+                Story.deleted_at.is_(None)
+            )
             result = await session.execute(stmt)
             expired_stories = result.scalars().all()
 
@@ -50,12 +54,11 @@ def cleanup_expired_stories():
 
 
 @task(queue="cleanup")
-def process_scheduled_deletions():
+def process_scheduled_deletions() -> dict:
     """
     Обработка запланированного удаления аккаунтов.
     Запускается раз в сутки.
     """
-    import asyncio
 
     async def _process():
         async with db_manager.session() as session:
@@ -74,7 +77,8 @@ def process_scheduled_deletions():
             for user in users_to_delete:
                 # Софт-удаление
                 user.deleted_at = now
-                user.status = "inactive"
+                user.is_deleted = True
+                user.status = UserStatus.INACTIVE
                 logger.info(f"Аккаунт {user.id} удален по истечении 30 дней")
 
             await session.commit()
@@ -86,4 +90,35 @@ def process_scheduled_deletions():
         return {"deleted_count": deleted_count}
     except Exception as e:
         logger.error(f"Ошибка удаления аккаунтов: {e}")
+        raise
+
+
+@task(queue="cleanup", bind=True)
+def cleanup_orphaned_data(self) -> dict:
+    """
+    Очистка orphaned данных (данных без владельцев).
+    """
+
+    async def _cleanup():
+        async with db_manager.session() as session:
+            # Очистка orphaned stories (истории без пользователей)
+            stmt = select(Story).where(
+                ~Story.user_id.in_(select(User.id))
+            )
+            result = await session.execute(stmt)
+            orphaned_stories = result.scalars().all()
+
+            for story in orphaned_stories:
+                await session.delete(story)
+                logger.info(f"Orphaned story {story.id} deleted")
+
+            await session.commit()
+            return len(orphaned_stories)
+
+    try:
+        deleted_count = asyncio.run(_cleanup())
+        logger.info(f"Очищено orphaned данных: {deleted_count}")
+        return {"deleted_count": deleted_count}
+    except Exception as e:
+        logger.error(f"Ошибка очистки orphaned данных: {e}")
         raise

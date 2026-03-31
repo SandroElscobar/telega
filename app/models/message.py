@@ -3,7 +3,7 @@
 """
 from __future__ import annotations
 from datetime import datetime
-from sqlalchemy import String, Boolean, ForeignKey, Integer, Text, JSON, BigInteger, Enum as SQLEnum, Index, DateTime, func
+from sqlalchemy import String, Boolean, ForeignKey, Integer, Text, JSON, BigInteger, Enum as SQLEnum, Index, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, Dict, Any, TYPE_CHECKING, List
 import enum
@@ -14,6 +14,8 @@ from app.models.base import Base, TimestampMixin, SoftDeleteMixin
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.chat import Chat
+    from app.models.reaction import Reaction
+    from app.models.moderation_log import ModerationStatus
 
 class MessageType(str, enum.Enum):
     """Тип сообщения."""
@@ -184,6 +186,123 @@ class Message(Base, TimestampMixin, SoftDeleteMixin):
         nullable=True,
         comment="Время последней правки"
     )
+
+    # ========== ПОЛЯ МОДЕРАЦИИ (ДОБАВЛЕНЫ) ==========
+
+    # Статус модерации
+    moderation_status: Mapped[ModerationStatus] = mapped_column(
+        SQLEnum(ModerationStatus),
+        default=ModerationStatus.PENDING,
+        nullable=False,
+        index=True,
+        comment="Статус модерации сообщения"
+    )
+
+    # Причина модерации (если заблокировано или удалено)
+    moderation_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Причина блокировки/удаления сообщения"
+    )
+
+    # Код причины для автоматической обработки
+    moderation_reason_code: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Код причины модерации (например: 'spam', 'abuse', 'nsfw')"
+    )
+
+    # Кто провел модерацию (ID модератора или 0 для автоматической)
+    moderated_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        comment="ID модератора, который провел модерацию"
+    )
+
+    # Время модерации
+    moderated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время проведения модерации"
+    )
+
+    # Связанный лог модерации
+    moderation_log_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("moderation_logs.id"),
+        nullable=True,
+        comment="ID записи в логе модерации"
+    )
+
+    # Количество жалоб на сообщение
+    reports_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Количество жалоб на сообщение"
+    )
+
+    # Автоматическая модерация
+    auto_moderated: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Было ли сообщение обработано автоматической модерацией"
+    )
+
+    # Оценка AI/автоматической модерации (0-1)
+    moderation_score: Mapped[Optional[float]] = mapped_column(
+        default=0.0,
+        nullable=True,
+        comment="Оценка риска от AI модерации (0-1)"
+    )
+
+    # Признак, что сообщение прошло AI проверку
+    ai_checked: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Проверено ли сообщение AI"
+    )
+
+    # Время AI проверки
+    ai_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время AI проверки"
+    )
+
+    # Для обжалования
+    appeal_status: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Статус обжалования (pending, approved, rejected)"
+    )
+
+    appeal_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Причина обжалования"
+    )
+
+    appeal_created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время создания обжалования"
+    )
+
+    appeal_resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время разрешения обжалования"
+    )
+
+    appeal_resolved_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        comment="Кто разрешил обжалование"
+    )
+
+    # ========== ОСТАЛЬНЫЕ ПОЛЯ ==========
 
 
     # Отношения

@@ -82,6 +82,27 @@ class Subscription(Base, TimestampMixin):
         comment="Дата отмены автопродления"
     )
 
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        index=True,  # Индекс для быстрого поиска активных подписок
+        comment="Активна ли подписка (обновляется автоматически)"
+    )
+
+    # Дополнительные поля для улучшения производительности
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время последней проверки статуса"
+    )
+
+    activated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Дата активации подписки"
+    )
+
     # Отношения
     user: Mapped["User"] = relationship(
         "User",
@@ -95,14 +116,25 @@ class Subscription(Base, TimestampMixin):
     )
 
     @property
-    def is_active(self) -> bool:
+    def is_active_property(self) -> bool:
         """Проверка активна ли подписка."""
         now = datetime.now(self.expires_at.tzinfo)
         return self.expires_at > now and not self.cancelled_at
 
+    def update_active_status(self) -> Mapped[bool]:
+        """
+        Обновляет статус is_active на основе expires_at и cancelled_at.
+        Возвращает новый статус.
+        """
+        self.is_active = self.is_active_property
+        self.last_checked_at = datetime.now(self.expires_at.tzinfo)
+        return self.is_active
+
     __table_args__ = (
+        Index('ix_subscriptions_user_active', 'user_id', 'is_active'),
         Index('ix_subscriptions_user_active', 'user_id', 'expires_at'),
         Index('ix_subscriptions_expires', 'expires_at'),
+        Index('ix_subscriptions_active_expires', 'is_active', 'expires_at')
     )
 
 

@@ -3,18 +3,23 @@
 """
 
 from celery import Celery
+import celery.schedules
 from celery.schedules import crontab
+from kombu import Queue, Exchange
 from app.core.config import settings
 import logging
 from prometheus_client import Counter, Histogram
-from circuitbreaker import circuit
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
 import signal
 import sys
-
+import time
+import redis
+from functools import wraps
+import json
 
 logger = logging.getLogger(__name__)
 
+# Метрики Prometheus
 CELERY_TASKS_PROCESSED = Counter(
     'celery_tasks_processed_total',
     'Total number of processed tasks',
@@ -32,15 +37,90 @@ CELERY_QUEUE_SIZE = Histogram(
     'Current queue sizes',
     ['queue_name']
 )
-# Создаем экземпляр Celery
+
+# Определение очередей с использованием современного API
+task_queues = [
+    Queue(
+        'high_priority',
+        Exchange('high_priority'),
+        routing_key='high_priority',
+        queue_arguments={
+            'x-max-priority': 10,
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'high_priority.dlq'
+        }
+    ),
+    Queue(
+        'default',
+        Exchange('default'),
+        routing_key='default',
+        queue_arguments={
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'default.dlq'
+        }
+    ),
+    Queue(
+        'media',
+        Exchange('media'),
+        routing_key='media',
+        queue_arguments={
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'media.dlq'
+        }
+    ),
+    Queue(
+        'notifications',
+        Exchange('notifications'),
+        routing_key='notifications',
+        queue_arguments={
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'notifications.dlq'
+        }
+    ),
+    Queue(
+        'cleanup',
+        Exchange('cleanup'),
+        routing_key='cleanup',
+        queue_arguments={
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'cleanup.dlq'
+        }
+    ),
+    Queue(
+        'premium',
+        Exchange('premium'),
+        routing_key='premium',
+        queue_arguments={
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'premium.dlq'
+        }
+    ),
+    Queue(
+        'moderation',
+        Exchange('moderation'),
+        routing_key='moderation',
+        queue_arguments={
+            'x-dead-letter-exchange': 'dlx',
+            'x-dead-letter-routing-key': 'moderation.dlq'
+        }
+    ),
+    # Dead Letter Queues
+    Queue('high_priority.dlq', Exchange('dlx'), routing_key='high_priority.dlq'),
+    Queue('default.dlq', Exchange('dlx'), routing_key='default.dlq'),
+    Queue('media.dlq', Exchange('dlx'), routing_key='media.dlq'),
+    Queue('notifications.dlq', Exchange('dlx'), routing_key='notifications.dlq'),
+    Queue('cleanup.dlq', Exchange('dlx'), routing_key='cleanup.dlq'),
+    Queue('premium.dlq', Exchange('dlx'), routing_key='premium.dlq'),
+    Queue('moderation.dlq', Exchange('dlx'), routing_key='moderation.dlq'),
+]
 
 celery_app = Celery(
     "messenger",
-    broker=settings.REDIS_URL,
-    backend=settings.REDIS_URL,
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_BACKEND_URL,
     include=[
         "app.tasks.media",
-        "app.tasks.notification",
+        "app.tasks.notifications",
         "app.tasks.cleanup",
         "app.tasks.premium",
         "app.tasks.moderation",
@@ -54,104 +134,18 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
+    result_accept_content=["json"],  # Добавлено для безопасности
     timezone="UTC",
     enable_utc=True,
 
     task_eager_propagates=False,
 
-    # Поведение при старте (актуально для Celery 5.3+)
+    # Поведение при старте
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=10,
 
-    # Очереди задач с приоритетами и DLQ
-    task_queues={
-        "high_priority": {
-            "exchange": "high_priority",
-            "routing_key": "high_priority",
-            "queue_arguments": {
-                'x-max-priority': 10,
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'high_priority.dlq'
-            }
-        },
-        "default": {
-            "exchange": "default",
-            "routing_key": "default",
-            "queue_arguments": {
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'default.dlq'
-            }
-        },
-        "media": {
-            "exchange": "media",
-            "routing_key": "media",
-            "queue_arguments": {
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'media.dlq'
-            }
-        },
-        "notifications": {
-            "exchange": "notifications",
-            "routing_key": "notifications",
-            "queue_arguments": {
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'notifications.dlq'
-            }
-        },
-        "cleanup": {
-            "exchange": "cleanup",
-            "routing_key": "cleanup",
-            "queue_arguments": {
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'cleanup.dlq'
-            }
-        },
-        "premium": {
-            "exchange": "premium",
-            "routing_key": "premium",
-            "queue_arguments": {
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'premium.dlq'
-            }
-        },
-        "moderation": {
-            "exchange": "moderation",
-            "routing_key": "moderation",
-            "queue_arguments": {
-                'x-dead-letter-exchange': 'dlx',
-                'x-dead-letter-routing-key': 'moderation.dlq'
-            }
-        },
-        # Dead Letter Queues
-        "high_priority.dlq": {
-            "exchange": "dlx",
-            "routing_key": "high_priority.dlq"
-        },
-        "default.dlq": {
-            "exchange": "dlx",
-            "routing_key": "default.dlq"
-        },
-        "media.dlq": {
-            "exchange": "dlx",
-            "routing_key": "media.dlq"
-        },
-        "notifications.dlq": {
-            "exchange": "dlx",
-            "routing_key": "notifications.dlq"
-        },
-        "cleanup.dlq": {
-            "exchange": "dlx",
-            "routing_key": "cleanup.dlq"
-        },
-        "premium.dlq": {
-            "exchange": "dlx",
-            "routing_key": "premium.dlq"
-        },
-        "moderation.dlq": {
-            "exchange": "dlx",
-            "routing_key": "moderation.dlq"
-        },
-    },
+    # Очереди задач
+    task_queues=task_queues,  # Используем список Queue объектов
 
     # Маршрутизация задач по умолчанию
     task_default_queue="default",
@@ -169,86 +163,66 @@ celery_app.conf.update(
         'interval_step': 0.2,
         'interval_max': 0.2,
     },
-
     # Ограничения
     task_time_limit=30 * 60,  # 30 минут
     task_soft_time_limit=25 * 60,  # 25 минут
-    worker_max_tasks_per_child=1000,  # Перезапуск воркера после 1000 задач
-    worker_max_memory_per_child=200000,  # 200MB лимит памяти
+    worker_max_tasks_per_child=1000,
+    worker_max_memory_per_child=200000,  # 200MB
 
     # Результаты
     result_expires=3600 * 24,  # 24 часа
     result_backend_transport_options={
         'retry_policy': {
             'timeout': 5.0,
-            'interval_start': 0,
-            'interval_step': 0.2,
-            'interval_max': 0.2,
             'max_retries': 3,
         }
     },
-
-    # Безопасность
-    security_key=settings.CELERY_SECURITY_KEY if hasattr(settings, 'CELERY_SECURITY_KEY') else None,
-    security_certificate=settings.CELERY_SECURITY_CERT if hasattr(settings, 'CELERY_SECURITY_CERT') else None,
-    security_digest='sha256',
-
     # Мониторинг и метрики
     worker_send_task_events=True,
     task_send_sent_event=True,
-    task_protocol=2,
 
     # Планировщик
     beat_schedule={
-        # Очистка просроченных историй каждые 15 минут
         "cleanup-expired-stories": {
             "task": "app.tasks.cleanup.cleanup_expired_stories",
             "schedule": crontab(minute="*/15"),
             "options": {"queue": "cleanup"},
         },
-        # Обработка запланированного удаления аккаунтов (раз в день)
         "process-scheduled-deletions": {
             "task": "app.tasks.cleanup.process_scheduled_deletions",
-            "schedule": crontab(hour=3, minute=0),  # 3:00 ночи
+            "schedule": crontab(hour=3, minute=0),
             "options": {"queue": "cleanup"},
         },
-        # Проверка истекающих подписок (раз в час)
         "check-expiring-subscriptions": {
             "task": "app.tasks.premium.check_expiring_subscriptions",
-            "schedule": crontab(minute=0),  # Каждый час
+            "schedule": crontab(minute=0),
             "options": {"queue": "premium"},
         },
-        # Автоматическая модерация новых сообщений
         "auto-moderate-new-messages": {
             "task": "app.tasks.moderation.auto_moderate_new_messages",
-            "schedule": crontab(minute="*/5"),  # Каждые 5 минут
+            "schedule": crontab(minute="*/5"),
             "options": {"queue": "moderation"},
         },
-        # Очистка старых результатов задач (раз в день)
         "cleanup-old-task-results": {
-            "task": "app.tasks.cleanup.cleanup_old_task_results",
-            "schedule": crontab(hour=4, minute=0),  # 4:00 ночи
+            "task": "app.tasks.monitoring.cleanup_old_task_results",
+            "schedule": crontab(hour=4, minute=0),
             "options": {"queue": "cleanup"},
         },
-        # Мониторинг здоровья системы (каждые 10 минут)
         "system-health-check": {
             "task": "app.tasks.monitoring.system_health_check",
             "schedule": crontab(minute="*/10"),
             "options": {"queue": "default"},
         },
-        # Мониторинг очередей (каждые 5 минут)
         "monitor-queue-sizes": {
             "task": "app.tasks.monitoring.monitor_queue_sizes",
             "schedule": crontab(minute="*/5"),
             "options": {"queue": "default"},
         },
-        # Автоматическое масштабирование (каждые 10 минут)
         "auto-scale-workers": {
             "task": "app.tasks.monitoring.auto_scale_workers",
             "schedule": crontab(minute="*/10"),
             "options": {"queue": "default"},
         },
-        # Проверка соединения с внешними сервисами (каждые 15 минут)
         "check-external-services": {
             "task": "app.tasks.monitoring.check_external_services",
             "schedule": crontab(minute="*/15"),
@@ -258,7 +232,7 @@ celery_app.conf.update(
 
     # Настройки для Redis
     broker_transport_options={
-        'visibility_timeout': 3600,  # 1 час
+        'visibility_timeout': 3600,
         'fanout_prefix': True,
         'fanout_patterns': True,
         'socket_keepalive': True,
@@ -268,46 +242,49 @@ celery_app.conf.update(
         'health_check_interval': 30,
     },
 
-    # Настройки для обработки больших задач
-    worker_prefetch_multiplier=1,  # По одной задаче на воркер для fairness
-    task_always_eager=False,  # Для продакшена всегда False
-
-    # Кэширование результатов
-    result_cache_backend='redis://localhost:6379/2',
-    result_cache_max=1000,
-
-    # Отладка
-    worker_enable_remote_control=True,
-    worker_pool_restarts=True,
+    # Настройки для обработки задач
+    worker_prefetch_multiplier=1,
+    task_always_eager=False,
+    worker_concurrency=4,  # Добавлено для лучшего контроля
 )
 
-# Инициализация OpenTelemetry
-CeleryInstrumentor().instrument()
+# Инициализация OpenTelemetry с обработкой ошибок
+try:
+    CeleryInstrumentor().instrument()
+    logger.info("OpenTelemetry instrumentation initialized")
+except Exception as e:
+    logger.warning(f"Failed to initialize OpenTelemetry: {e}")
 
 
-# Декоратор для привязки задачи к конкретной очереди с метриками
-def task(queue: str = "default", priority: int = 5, **kwargs):
+# Улучшенный декоратор задач с метриками и retry tracking
+def task(queue: str = "default", priority: int = 5, track_retries: bool = False, **kwargs):
     """Декоратор для явного указания очереди задачи с метриками."""
 
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
-            import time
             start_time = time.time()
+            is_retry = kwargs.get('_is_retry', False)
 
             try:
                 result = func(*args, **kwargs)
-                CELERY_TASKS_PROCESSED.labels(
-                    queue=queue,
-                    task_name=func.__name__,
-                    status='success'
-                ).inc()
+
+                # Учитываем retry только если нужно
+                if not is_retry or track_retries:
+                    CELERY_TASKS_PROCESSED.labels(
+                        queue=queue,
+                        task_name=func.__name__,
+                        status='success'
+                    ).inc()
+
                 return result
             except Exception as e:
-                CELERY_TASKS_PROCESSED.labels(
-                    queue=queue,
-                    task_name=func.__name__,
-                    status='error'
-                ).inc()
+                if not is_retry or track_retries:
+                    CELERY_TASKS_PROCESSED.labels(
+                        queue=queue,
+                        task_name=func.__name__,
+                        status='error'
+                    ).inc()
                 logger.error(f"Task {func.__name__} failed: {e}")
                 raise
             finally:
@@ -317,33 +294,53 @@ def task(queue: str = "default", priority: int = 5, **kwargs):
                     task_name=func.__name__
                 ).observe(duration)
 
-        # Применяем circuit breaker для устойчивости
-        wrapped_with_circuit = circuit(
-            failure_threshold=5,
-            recovery_timeout=60,
-            expected_exception=Exception
+        # Применяем базовую обертку без circuit breaker (перенесем в задачи)
+        return celery_app.task(
+            queue=queue,
+            priority=priority,
+            **kwargs
         )(wrapper)
-
-        return celery_app.task(queue=queue, priority=priority, **kwargs)(wrapped_with_circuit)
 
     return decorator
 
 
-# Декоратор для задач с кэшированием
+# Улучшенный декоратор для кэширования с Redis
 def cached_task(queue: str = "default", cache_timeout: int = 3600, **kwargs):
-    """Декоратор для задач с кэшированием результатов."""
+    """Декоратор для задач с кэшированием результатов в Redis."""
 
     def decorator(func):
-        from functools import lru_cache
+        @celery_app.task(queue=queue, **kwargs)
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Генерируем ключ кэша
+            cache_key = f"task_cache:{func.__name__}:{hash(str(args) + str(kwargs))}"
 
-        @lru_cache(maxsize=100)
-        def cached_wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+            try:
+                # Пытаемся получить из кэша
+                redis_client = redis.from_url(settings.REDIS_URL)
+                cached_result = redis_client.get(cache_key)
 
-        return celery_app.task(
-            queue=queue,
-            **kwargs
-        )(cached_wrapper)
+                if cached_result:
+                    logger.debug(f"Cache hit for {func.__name__}")
+                    return json.loads(cached_result)
+
+                # Выполняем задачу
+                result = func(*args, **kwargs)
+
+                # Сохраняем в кэш
+                redis_client.setex(
+                    cache_key,
+                    cache_timeout,
+                    json.dumps(result, default=str)
+                )
+
+                return result
+            except Exception as e:
+                logger.error(f"Cache error for {func.__name__}: {e}")
+                # В случае ошибки кэша, просто выполняем задачу
+                return func(*args, **kwargs)
+
+        return wrapper
 
     return decorator
 
@@ -361,14 +358,33 @@ def init_celery(app):
     return celery_app
 
 
-# Обработка graceful shutdown
+# Улучшенная обработка graceful shutdown
 def setup_graceful_shutdown():
     """Настройка обработки graceful shutdown."""
+    shutdown_requested = False
 
     def handle_shutdown(signum, frame):
+        nonlocal shutdown_requested
+        if shutdown_requested:
+            logger.warning("Force shutdown...")
+            sys.exit(1)
+
         logger.info("Received shutdown signal, stopping Celery workers gracefully...")
-        celery_app.control.shutdown()
-        sys.exit(0)
+        shutdown_requested = True
+
+        try:
+            # Отправляем сигнал остановки
+            celery_app.control.shutdown()
+
+            # Даем время на завершение текущих задач
+            logger.info("Waiting for tasks to complete (max 30 seconds)...")
+            time.sleep(30)
+
+            logger.info("Shutdown complete")
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            sys.exit(1)
 
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
@@ -377,11 +393,7 @@ def setup_graceful_shutdown():
 # Функция для проверки конфигурации
 def validate_celery_config():
     """Валидация конфигурации Celery."""
-    required_settings = [
-        'REDIS_URL',
-        'CELERY_SECURITY_KEY',
-        'CELERY_SECURITY_CERT'
-    ]
+    required_settings = ['REDIS_URL']
 
     missing = []
     for setting in required_settings:
@@ -391,18 +403,27 @@ def validate_celery_config():
     if missing:
         logger.warning(f"Missing Celery settings: {missing}")
 
-    # Проверка соединения с Redis
+    # Проверка соединения с Redis с использованием пула соединений
     try:
-        import redis
-        r = redis.from_url(settings.REDIS_URL)
-        r.ping()
+        redis_client = redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=True
+        )
+        redis_client.ping()
         logger.info("Redis connection successful")
+
+        # Проверяем создание очередей
+        for queue in task_queues:
+            logger.debug(f"Queue configured: {queue.name}")
+
     except Exception as e:
         logger.error(f"Redis connection failed: {e}")
         raise
 
 
-# Инициализация при импорте
+# Инициализация
 setup_graceful_shutdown()
 
 # Экспортируем метрики для Prometheus

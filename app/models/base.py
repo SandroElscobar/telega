@@ -43,7 +43,3 @@ class SoftDeleteMixin:
         index=True,
         comment="Дата и время удаления (если не NULL - запись считается удаленной)"
     )
-    @property
-    def is_deleted(self) -> bool:
-        """Проверка, удалена ли запись."""
-        return self.deleted_at is not None
